@@ -4,6 +4,7 @@
 
 (def test-times 20)
 
+;;FIXME: sometimes a vector or map can be empty, i don't think these generators handle such a case
 (defn gen-structure-from-domain
   "Create a function that when invoked will generate a random extension of `domain`."
   [domain]
@@ -11,24 +12,21 @@
         get-size (fn [& args] (Math/floor (rand max-size)))
         exec     (fn [f] (f))]
     (letfn [(create [domain]
-              (cond (symbol? domain) rand
-
-                    (or (vector? domain) (set? domain))
-                    (let [create-elems (map create domain)
-                          return (if (vector? domain) identity (partial into #{}))]
-                      (fn [& args]
-                        (->> (for [_ (range 0 (* (count domain) (get-size)))]
-                               (mapv exec create-elems))
-                             (reduce into [])
-                             return)))
-
-                    (map? domain)
-                    (let [[k v] (first domain)
-                          create-key (create k)
-                          create-val (create v)]
-                      (fn [& args]
-                        (->> (for [_ (range 0 (get-size))] [(create-key) (create-val)])
-                             (into {}))))))]
+              (cond
+                (symbol? domain)                    rand
+                (or (vector? domain) (set? domain)) (let [create-elems (map create domain)
+                                                          return (if (vector? domain) identity (partial into #{}))]
+                                                      (fn [& args]
+                                                        (->> (for [_ (range 0 (* (count domain) (get-size)))]
+                                                               (mapv exec create-elems))
+                                                          (reduce into [])
+                                                          return)))
+                (map? domain)                      (let [[k v] (first domain)
+                                                         create-key (create k)
+                                                         create-val (create v)]
+                                                     (fn [& args]
+                                                       (->> (for [_ (range 0 (get-size))] [(create-key) (create-val)])
+                                                         (into {}))))))]
       (create domain))))
 
 (defn test-trans
@@ -102,28 +100,53 @@
   )
 
 (deftest test-vector-domains
-  (let [seconds (fn [v] (map second (partition 2 v)))
-        sums-of-pairs-of-odds (fn [v] (map (fn [[a b c d]] (+ a c)) (partition 4 v)))
-        sums-of-1-3-in-2 (fn [v] (->> v
-                                      (partition 3)
-                                      (map second)
-                                      (map (partial partition 3))
-                                      (map (fn [v2] (into #{}
-                                                          (map (fn [[a _ c]] (+ a (or c 0))) v2))))
-                                      (reduce into #{})))
-        super-contrived (fn [v] (->> v
-                                     (partition 2)
-                                     (map first)
-                                     (map #(->> %
-                                                (map (fn [[k vector]]
-                                                       (into #{} (map (partial + k) vector))))
-                                                (reduce into #{})))
-                                     (reduce into #{})))]
-    (test-transformer [_ b] [b] [] seconds)
-    (test-transformer [a _ c _] [(+ a c)] [a c] sums-of-pairs-of-odds)
-    (test-transformer [[a]] [a] [] (partial reduce into []))
-    (test-transformer [_ [a _ c] _] #{(+ a c)} [a c] sums-of-1-3-in-2)
-    (test-transformer [{k [v]} _] #{(+ k v)} [] super-contrived)))
+  (testing "seconds"
+      (test-transformer
+        [_ b]
+        [b]
+        []
+        (fn [v] (map second (partition 2 v)))))
+
+  (testing "sums-of-pairs-of-odds"
+      (test-transformer
+        [a _ c _]
+        [(+ a c)]
+        [a c]
+        (fn [v] (map (fn [[a b c d]] (+ a c)) (partition 4 v)))))
+
+  (testing "nested array binding"
+      (test-transformer
+        [[a]]
+        [a]
+        []
+        (partial reduce into [])))
+
+  (testing "sums-of-1-3-in-2"
+      (test-transformer
+        [_ [a _ c] _]
+        #{(+ a c)}
+        [a c]
+        (fn [v] (->> v
+                  (partition 3)
+                  (map second)
+                  (map (partial partition 3))
+                  (map (fn [v2] (into #{}
+                                  (map (fn [[a _ c]] (+ a (or c 0))) v2))))
+                  (reduce into #{})))))
+
+  (testing "super-contrived"
+      (test-transformer
+        [{k [v]} _]
+        #{(+ k v)}
+        [k v] ;; need where clauses to prevent exceptions
+        (fn [v] (->> v
+                  (partition 2)
+                  (map first)
+                  (map #(->> %
+                          (map (fn [[k vector]]
+                                 (into #{} (map (partial + k) vector))))
+                          (reduce into #{})))
+                  (reduce into #{}))))))
 
 (deftest test-set-domains
   (let [adj-sums (fn [s] (->> s
@@ -459,3 +482,35 @@
                        (if (even? x) [(* 2 x)] [(+ 1 x)])})
          {:even [4 8 12]
           :odd [2 4 6]})))
+
+(deftest test-array-match-where-array-is-missing-from-inputs
+  (is (=
+        {:o {:a :b}}
+        (f/transform
+          {:a :b}
+          {:k [v] :as o}
+          {:o o})))
+
+  (is (=
+        {:o {:a :b} :vk nil}
+        (f/transform
+          {:a :b}
+          {:k [{:vk vk}] :as o}
+          {:o o :vk vk})
+        ))
+
+  (is (=
+        []
+        (f/transform
+          {:a :b}
+          {:k [{:vk vk}] :as o}
+          [vk])
+        ))
+
+  (is (=
+        {:o {:a :b :k []}}
+        (f/transform
+          {:a :b :k []}
+          {:k [v] :as o}
+          {:o o})))
+  )

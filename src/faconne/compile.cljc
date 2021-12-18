@@ -34,7 +34,7 @@
            [:vector num-children]
            (if (= 1 num-children)
              (let [new-parent (gensym "vec-parent")]
-               {:doseq-bindings [new-parent parent-sym]
+               {:doseq-bindings [new-parent `(or (seq ~parent-sym) [nil])]
                 :id->sym {(first id) new-parent}})
 
              (let [new-parents (for [_ id] (gensym "vec-elem"))]

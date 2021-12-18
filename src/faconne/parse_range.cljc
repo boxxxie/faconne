@@ -216,14 +216,15 @@
         {:init `(volatile! {})
          :return `(eval-reduce-data (deref ~result-sym))
          :modifier `(vswap! ~result-sym deep-merge ~converted-range)})
-      (cond (or (vector? range) (set? range))
-            {:init `(volatile! ~(if (vector? range) `(transient []) `(transient #{})))
-             :return `(vswap! ~result-sym persistent!)
-             :modifier (if (= (count range) 1)
-                         `(vswap! ~result-sym conj! ~(first range))
-                         `(vswap! ~result-sym (fn [x#] (into! x# ~range))))}
+      (cond
+        (or (vector? range) (set? range))
+        {:init `(volatile! ~(if (vector? range) `(transient []) `(transient #{})))
+         :return `(vswap! ~result-sym persistent!)
+         :modifier (if (= (count range) 1)
+                     `(when ~(first range) (vswap! ~result-sym conj! ~(first range)))
+                     `(vswap! ~result-sym (fn [x#] (into! x# ~range))))}
 
-            (map? range)
-            {:init `(volatile! {})
-             :return `(deref ~result-sym)
-             :modifier `(vswap! ~result-sym deep-merge ~range)}))))
+        (map? range)
+        {:init `(volatile! {})
+         :return `(deref ~result-sym)
+         :modifier `(vswap! ~result-sym deep-merge ~range)}))))
