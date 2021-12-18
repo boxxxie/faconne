@@ -1,4 +1,4 @@
-(ns faconne.test.core
+(ns faconne.test.core-test
   (:require [faconne.core :as f])
   (:use [clojure.test]))
 
@@ -48,47 +48,58 @@
        (test-trans mkdata# (quote ~domain) (quote ~range') (quote ~where) ~hand-written))))
 
 (deftest test-map-domains
-  (let [swap-key-order ;; {k1 {k2 v}} -> {k2 {k1 v}}
-        (fn [m]
-          (or
-           (apply merge-with merge
-                  (map (fn [[k1 inner]]
-                         (apply merge-with merge
-                                (map (fn [[k2 v]]
-                                       {k2 {k1 v}}) inner))) m))
-           {}))
-        remove-inner ;; {k1 {k2 v}} -> {k1 #{v}}
-        (fn [m]
-          (or
-           (apply merge-with into
-                  (map (fn [[k inner]]
-                         (apply merge-with into
-                                (map (fn [[_ v]] {k #{v}}) inner)))
-                       m))
-           {}))
+  (testing "swap-key-order: {k1 {k2 v}} -> {k2 {k1 v}}"
+    (test-transformer
+      {k1 {k2 v}} {k2 {k1 v}} []
+      (fn [m]
+        (or
+          (apply merge-with merge
+            (map (fn [[k1 inner]]
+                   (apply merge-with merge
+                     (map (fn [[k2 v]]
+                            {k2 {k1 v}}) inner))) m))
+          {}))))
 
-        flip (fn [m] (or (into {} (map (fn [[k v]] [v k]) m)) {})) ;; {k v} -> {v k}
+  (testing "remove-inner: {k1 {k2 v}} -> {k1 #{v}}"
+    (test-transformer
+      {k {_ v}} {k #{v}} []
+      (fn [m]
+        (or
+          (apply merge-with into
+            (map (fn [[k inner]]
+                   (apply merge-with into
+                     (map (fn [[_ v]] {k #{v}}) inner)))
+              m))
+          {}))))
 
-        skipping-flatset (fn [m] ;; {k [v]} -> #{[k v]}
-                            (or
-                             (reduce into #{}
-                                     (map (fn [[k vector]]
-                                            (reduce into #{} (->> vector
-                                                                  (partition 2)
-                                                                  (map first)
-                                                                  (map (fn [v] #{[k v]})))))
-                                          m))
-                             {}))
-        sums-of-all-pairs-of-vals (fn [m] (let [vs (vals m)]
-                                            (reduce into #{}
-                                                    (map (fn [i]
-                                                           (into #{} (map (fn [j] (+ i j)) vs)))
-                                                         vs))))]
-    (test-transformer {k1 {k2 v}} {k2 {k1 v}} [] swap-key-order)
-    (test-transformer {k {_ v}} {k #{v}} [] remove-inner)
-    (test-transformer {k v} {v k} [] flip)
-    (test-transformer {k [v _]} #{[k v]} [] skipping-flatset)
-    (test-transformer {k1 v1, k2 v2} #{(+ v1 v2)} [] sums-of-all-pairs-of-vals)))
+  (testing "flip: {k v} -> {v k}"
+    (test-transformer
+      {k v} {v k} []
+      (fn [m] (or (into {} (map (fn [[k v]] [v k]) m)) {}))))
+
+  (testing "skipping-flatset: {k [v]} -> #{[k v]}"
+    (test-transformer
+      {k [v _]} #{[k v]} []
+      (fn [m]
+        (or
+          (reduce into #{}
+            (map (fn [[k vector]]
+                   (reduce into #{} (->> vector
+                                      (partition 2)
+                                      (map first)
+                                      (map (fn [v] #{[k v]})))))
+              m))
+          {}))))
+
+  (testing "sums-of-all-pairs-of-vals"
+    (test-transformer
+      {k1 v1, k2 v2} #{(+ v1 v2)} []
+      (fn [m] (let [vs (vals m)]
+                (reduce into #{}
+                  (map (fn [i]
+                         (into #{} (map (fn [j] (+ i j)) vs)))
+                    vs))))))
+  )
 
 (deftest test-vector-domains
   (let [seconds (fn [v] (map second (partition 2 v)))
